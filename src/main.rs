@@ -1,7 +1,7 @@
 use arboard::{Clipboard, Error as ClipboardError, ImageData};
 use eframe::{egui, NativeOptions};
 use egui::{Ui, ColorImage};
-use image::{DynamicImage, ImageError, FlatSamples, ImageBuffer};
+use image::{DynamicImage, ImageError, FlatSamples};
 
 #[derive(Clone)]
 enum ClipBoardContent { 
