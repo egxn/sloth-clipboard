@@ -1,6 +1,7 @@
 use arboard::{Clipboard, Error as ClipboardError, ImageData};
 use eframe::{egui, NativeOptions};
-use egui::Ui;
+use egui::{Ui, ColorImage};
+use image::{DynamicImage, ImageError, FlatSamples, ImageBuffer};
 
 #[derive(Clone)]
 enum ClipBoardContent { 
@@ -10,46 +11,29 @@ enum ClipBoardContent {
 
 #[derive(Clone)]
 struct Clip {
-  id: usize,
+  _id: usize,
   content: Option<ClipBoardContent>,
-  is_code: bool,
-  pinned: bool,
+  _texture: Option<egui::TextureHandle>,
 }
 
 impl Default for Clip {
   fn default() -> Self {
     Self {
-      id: 0,
+      _id: 0,
       content: None,
-      is_code: false,
-      pinned: false,
+      _texture: None,
     }
   }
 }
 
-fn main() {
-  let options: NativeOptions = NativeOptions {
-    initial_window_size: Some(egui::Vec2::new(300.0, 600.0)),
-    ..eframe::NativeOptions::default()
-  };
-                  
-  eframe::run_native(
-    "Sloth 🦥",
-    options,
-    Box::new(|_cc| Box::new(Sloth::default())),
-  );
-}
-
 struct Sloth {
   clips: Vec<Clip>,
-  saved_clips: Vec<Clip>,
 }
 
 impl Default for Sloth {
   fn default() -> Self {
     Self { 
       clips: Vec::new(),
-      saved_clips: Vec::new(),
     }
   }
 }
@@ -65,44 +49,14 @@ impl eframe::App for Sloth {
               if let Some(content) = &clip.content {
                 match  content {
                   ClipBoardContent::TextContent(text) => {
-                    ui.label(text.clone());
-                    egui::Grid::new(format!("row_{}",clip.id))
-                      .num_columns(3)
-                      .min_col_width(100.0)
-                      .show(ui, |ui| {
-                        if ui.button("Copy").clicked() {
-                          let mut clipboard: Clipboard = Clipboard::new().unwrap();
-                          clipboard.set_text(text.clone()).unwrap();
-                        };
-
-                        if ui.button("Code").clicked() {
-                          clip.is_code = true;
-                        };
-
-                        if !clip.pinned {
-                          if ui.button("  Pin  ").clicked() {
-                            let new_clip = Clip {
-                              id: self.saved_clips.len(),
-                              content: Some(ClipBoardContent::TextContent(text.clone())),
-                              is_code: clip.is_code,
-                              pinned: true,
-                            };
-                            clip.pinned = true;
-                            self.saved_clips.push(new_clip);
-                          };
-                        }
-                        if clip.pinned {
-                          if ui.button("Unpin").clicked() {
-                            clip.pinned = false;
-                            self.saved_clips.retain(|c| c.id != clip.id);
-                          };
-                        }
-                        ui.end_row();
-                    });
+                      ui.label(text.clone());
+                      if ui.button("Copy").clicked() {
+                        let mut clipboard: Clipboard = Clipboard::new().unwrap();
+                        clipboard.set_text(text.clone()).unwrap();
+                      };
                     ui.add(egui::Separator::default());
                   },
-                  ClipBoardContent::ImageContent(_image) => {
-                  },
+                  ClipBoardContent::ImageContent(_image) => { },
                 } 
               }
             });
@@ -115,22 +69,33 @@ impl eframe::App for Sloth {
 
     if let Some(clip) = get_clip_to_add(&last_clip_content) {
       let new_clip = Clip {
-        id: self.clips.len(),
+        _id: self.clips.len(),
         content: Some(clip),
-        is_code: false,
-        pinned: false,
+        _texture: None,
       };
       self.clips.push(new_clip);
     }
   }
 }
 
+fn main() {
+  let options: NativeOptions = NativeOptions {
+    initial_window_size: Some(egui::Vec2::new(300.0, 600.0)),
+    ..eframe::NativeOptions::default()
+  };
+
+  eframe::run_native(
+    "Sloth 🦥",
+    options,
+    Box::new(|_cc| Box::new(Sloth::default())),
+  );
+}
 
 fn get_clipboard_content() -> Option<ClipBoardContent> {
   let mut clipboard: Clipboard = Clipboard::new().unwrap();
   let text: Result<String, ClipboardError> = clipboard.get_text();
   let image: Result<ImageData<'static>, ClipboardError> = clipboard.get_image();
-
+  
   if let Ok(text) = text {
     return Some(ClipBoardContent::TextContent(text))
   } else if let Ok(image) = image {
@@ -141,7 +106,7 @@ fn get_clipboard_content() -> Option<ClipBoardContent> {
 }
 
 fn get_clip_to_add(last_clip_content: &Option<ClipBoardContent>) -> Option<ClipBoardContent> {
-  let clipboard_content = get_clipboard_content();
+  let clipboard_content:Option<ClipBoardContent> = get_clipboard_content();
   if let Some(content) = clipboard_content {
     match content {
       ClipBoardContent::TextContent(text) => {
@@ -156,9 +121,42 @@ fn get_clip_to_add(last_clip_content: &Option<ClipBoardContent>) -> Option<ClipB
           }
         }
       },
-      ClipBoardContent::ImageContent(_image) => return None,
+      ClipBoardContent::ImageContent(image) => {
+        if let Some(last_content) = last_clip_content {
+          match last_content {
+            ClipBoardContent::ImageContent(last_image) => {
+              if &last_image.bytes.as_ref() != &image.bytes.as_ref() {
+                return Some(ClipBoardContent::ImageContent(image));
+              }
+            },
+            _ => return None,
+          }
+        }
+      },
     }
   }
 
   None
 }
+
+fn _load_image_from_memory(image_data: &[u8]) -> Result<ColorImage, image::ImageError> {
+  let image: DynamicImage = image::load_from_memory(image_data)?;
+  let size: [usize; 2] = [image.width() as _, image.height() as _];
+  let image_buffer = image.to_rgba8();
+  let pixels: FlatSamples<&[u8]> = image_buffer.as_flat_samples();
+  Ok(ColorImage::from_rgba_unmultiplied(
+      size,
+      pixels.as_slice(),
+  ))
+}
+
+fn _create_texture(id: usize, image: &ImageData, ui: &mut Ui) -> Option<egui::TextureHandle> {
+  let img: Result<ColorImage, ImageError> = _load_image_from_memory(image.bytes.as_ref());
+
+  Some(ui.ctx().load_texture(
+    format!("img_{}", id),
+    img.unwrap(),
+    egui::TextureFilter::Linear
+  ))
+}
+
